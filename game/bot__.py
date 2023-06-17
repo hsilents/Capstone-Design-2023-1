@@ -12,18 +12,16 @@ import random
 import numpy as np
 from collections import deque
 
-GAME = 'bird' #日志文件的名字
-ACTIONS = 2 #有效操作数
-GAMMA = 0.99 #衰减率
-OBSERVE = 100000. #前OBSERVE轮次，不对网络进行训练，只收集数据存到记忆库中
-#第OBSERVE到OBSERVE+EXPLORE轮次中，对网络进行训练，且对epsilon进行退火，逐渐减小epsilon至FINAL_EPSILON
-#当到达EXPLORE轮次时，epsilon达到最终值FINAL_EPSILON，不再对其进行更新
-EXPLORE = 2000000. #上限
-FINAL_EPSILON = 0.0001 #EPSILON的最终值
-INITIAL_EPSILON = 0.0001 #EPSILON的初始值
-REPLAY_MEMORY = 50000 #记忆库
-BATCH = 32 #训练批次
-FRAME_PER_ACTION = 1 #每隔FRAME_PER_ACTION轮次，就会有epsilon的概率进行探索
+GAME = 'bird' 
+ACTIONS = 2 
+GAMMA = 0.99 
+OBSERVE = 100000. 
+EXPLORE = 2000000. 
+FINAL_EPSILON = 0.0001 
+INITIAL_EPSILON = 0.0001 
+REPLAY_MEMORY = 50000 
+BATCH = 32 
+FRAME_PER_ACTION = 1 
 
 def weight_variable(shape):
     initial = tf.truncated_normal(shape, stddev = 0.01)
@@ -40,7 +38,6 @@ def max_pool_2x2(x):
     return tf.nn.max_pool(x, ksize = [1, 2, 2, 1], strides = [1, 2, 2, 1], padding = "SAME")
 
 def createNetwork():
-    #定义深度神经网络的参数和配置
     W_conv1 = weight_variable([8, 8, 4, 32])
     b_conv1 = bias_variable([32])
 
@@ -56,48 +53,37 @@ def createNetwork():
     W_fc2 = weight_variable([512, ACTIONS])
     b_fc2 = bias_variable([ACTIONS])
 
-    #输入层
     s = tf.placeholder("float", [None, 80, 80, 4])
 
-    #隐藏层
     h_conv1 = tf.nn.relu(conv2d(s, W_conv1, 4) + b_conv1)
     h_pool1 = max_pool_2x2(h_conv1)
 
     h_conv2 = tf.nn.relu(conv2d(h_pool1, W_conv2, 2) + b_conv2)
-    #h_pool2 = max_pool_2x2(h_conv2)
 
     h_conv3 = tf.nn.relu(conv2d(h_conv2, W_conv3, 1) + b_conv3)
-    #h_pool3 = max_pool_2x2(h_conv3)
 
-    #h_pool3_flat = tf.reshape(h_pool3, [-1, 256])
     h_conv3_flat = tf.reshape(h_conv3, [-1, 1600])
 
     h_fc1 = tf.nn.relu(tf.matmul(h_conv3_flat, W_fc1) + b_fc1)
 
-    #输出层
     readout = tf.matmul(h_fc1, W_fc2) + b_fc2
 
     return s, readout, h_fc1
 
 def trainNetwork(s, readout, h_fc1, sess):
-    #定义损失函数
     a = tf.placeholder("float", [None, ACTIONS])
     y = tf.placeholder("float", [None])
     readout_action = tf.reduce_sum(tf.multiply(readout, a), reduction_indices=1)
     cost = tf.reduce_mean(tf.square(y - readout_action))
     train_step = tf.train.AdamOptimizer(1e-6).minimize(cost)
 
-    #开启游戏模拟器，打开一个模拟器的窗口，实时显示游戏的信息
     game_state = game.GameState()
 
-    #创建一个双端队列存放replay memory
     D = deque()
 
-    #写入文件
     a_file = open("logs_" + GAME + "/readout.txt", 'w')
     h_file = open("logs_" + GAME + "/hidden.txt", 'w')
 
-    #设置游戏的初始状态，设置动作为不执行跳跃，修改初始状态为80*80*4大小
     do_nothing = np.zeros(ACTIONS)
     do_nothing[0] = 1
     x_t, r_0, terminal = game_state.frame_step(do_nothing)
@@ -105,7 +91,6 @@ def trainNetwork(s, readout, h_fc1, sess):
     ret, x_t = cv2.threshold(x_t,1,255,cv2.THRESH_BINARY)
     s_t = np.stack((x_t, x_t, x_t, x_t), axis=2)
 
-    #加载或保存网络参数
     saver = tf.train.Saver()
     sess.run(tf.initialize_all_variables())
     checkpoint = tf.train.get_checkpoint_state("saved_networks")
@@ -115,32 +100,26 @@ def trainNetwork(s, readout, h_fc1, sess):
     else:
         print("Could not find old network weights")
 
-    #开始训练
     epsilon = INITIAL_EPSILON
     t = 0
     while "flappy bird" != "angry bird":
-        #使用epsilon贪心策略选择一个动作
         readout_t = readout.eval(feed_dict={s : [s_t]})[0]
         a_t = np.zeros([ACTIONS])
         action_index = 0
         if t % FRAME_PER_ACTION == 0:
-            #执行一个随即动作
             if random.random() <= epsilon:
                 print("----------Random Action----------")
                 action_index = random.randrange(ACTIONS)
                 a_t[random.randrange(ACTIONS)] = 1
-            #由神经网络计算的Q(s,a)值选择对应的动作
             else:
                 action_index = np.argmax(readout_t)
                 a_t[action_index] = 1
         else:
-            a_t[0] = 1 #不执行跳跃动作
+            a_t[0] = 1 
 
-        #随着游戏的进行，不断降低epsilon，减少随即动作
         if epsilon > FINAL_EPSILON and t > OBSERVE:
             epsilon -= (INITIAL_EPSILON - FINAL_EPSILON) / EXPLORE
 
-        #执行选择的动作，并获得下一状态及回报
         x_t1_colored, r_t, terminal = game_state.frame_step(a_t)
         x_t1 = cv2.cvtColor(cv2.resize(x_t1_colored, (80, 80)), cv2.COLOR_BGR2GRAY)
         ret, x_t1 = cv2.threshold(x_t1, 1, 255, cv2.THRESH_BINARY)
@@ -148,49 +127,39 @@ def trainNetwork(s, readout, h_fc1, sess):
         #s_t1 = np.append(x_t1, s_t[:,:,1:], axis = 2)
         s_t1 = np.append(x_t1, s_t[:, :, :3], axis=2)
 
-        #将状态转移过程存储到D中，用于更新参数时采样
         D.append((s_t, a_t, r_t, s_t1, terminal))
         if len(D) > REPLAY_MEMORY:
             D.popleft()
 
-        #过了观察期，才会进行网络参数的更新
         if t > OBSERVE:
-            #从D中随机采样，用于参数更新
             minibatch = random.sample(D, BATCH)
 
-            #分别将当前状态、采取的动作、获得的回报、下一状态分组存放
             s_j_batch = [d[0] for d in minibatch]
             a_batch = [d[1] for d in minibatch]
             r_batch = [d[2] for d in minibatch]
             s_j1_batch = [d[3] for d in minibatch]
 
-            #计算Q(s,a)的新值
             y_batch = []
             readout_j1_batch = readout.eval(feed_dict = {s : s_j1_batch})
             for i in range(0, len(minibatch)):
                 terminal = minibatch[i][4]
-                #如果游戏结束，则只有反馈值
                 if terminal:
                     y_batch.append(r_batch[i])
                 else:
                     y_batch.append(r_batch[i] + GAMMA * np.max(readout_j1_batch[i]))
 
-            #使用梯度下降更新网络参数
             train_step.run(feed_dict = {
                 y : y_batch,
                 a : a_batch,
                 s : s_j_batch}
             )
 
-        #状态发生改变，用于下次循环
         s_t = s_t1
         t += 1
 
-        #每进行10000次迭代，保留一下网络参数
         if t % 10000 == 0:
             saver.save(sess, 'saved_networks/' + GAME + '-dqn', global_step = t)
 
-        #打印游戏信息
         state = ""
         if t <= OBSERVE:
             state = "observe"
@@ -202,7 +171,6 @@ def trainNetwork(s, readout, h_fc1, sess):
         print("TIMESTEP", t, "/ STATE", state, \
             "/ EPSILON", epsilon, "/ ACTION", action_index, "/ REWARD", r_t, \
             "/ Q_MAX %e" % np.max(readout_t))
-        #写入文件
         '''
         if t % 10000 <= 100:
             a_file.write(",".join([str(x) for x in readout_t]) + '\n')
